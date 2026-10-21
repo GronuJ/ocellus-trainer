@@ -61,14 +61,14 @@
   <label><input type="checkbox" id="run" checked> Run (R)</label>
   <label>Wave every <select id="interval">
     <option value="2">2 ticks</option><option value="3">3 ticks</option>
-    <option value="4" selected>4 ticks</option><option value="5">5 ticks</option>
+    <option value="4">4 ticks</option><option value="5" selected>5 ticks</option><option value="6">6 ticks</option>
   </select></label>
   <label>Waves per quadrant <select id="sets">
     <option>3</option><option selected>4</option><option>5</option><option>6</option><option>8</option>
   </select></label>
   <label>Portal time <select id="portalTicks">
-    <option value="3">3 ticks</option><option value="4" selected>4 ticks</option>
-    <option value="5">5 ticks</option><option value="6">6 ticks</option>
+    <option value="3">3 ticks</option><option value="4">4 ticks</option>
+    <option value="5">5 ticks</option><option value="6">6 ticks</option><option value="7" selected>7 ticks</option><option value="8">8 ticks</option>
   </select></label>
   <label>Safe zone <select id="w">
     <option value="2" selected>2×2</option><option value="1">1×1</option>
@@ -98,7 +98,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const cv = $('c'), ctx = cv.getContext('2d');
-const cfg = { q: 12, w: 2, interval: 4, sets: 4, portalTicks: 4, run: true, fair: true, guides: false, tickMs: 600 };
+const cfg = { q: 12, w: 2, interval: 5, sets: 4, portalTicks: 7, run: true, fair: true, guides: false, tickMs: 600 };
 const rnd = n => Math.floor(Math.random() * n);
 const now = () => performance.now();
 
