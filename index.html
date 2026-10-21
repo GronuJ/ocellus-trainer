@@ -105,13 +105,25 @@ function resetStats() {
 }
 
 function quadRange(qi) { return qi === 0 ? [0, cfg.q - 1] : [cfg.q + 1, 2 * cfg.q]; }
+// The arena is an octagon: each quadrant is a q×q square with its outer corner cut off diagonally,
+// leaving straight outer walls of `edge` tiles (12 / 12 / 4 / 4 + the diagonal for the real fight).
+function validTile(x, y) {
+  const u = Math.abs(x - cfg.q) - 1, v = Math.abs(y - cfg.q) - 1, edge = Math.round(cfg.q / 3);
+  return u >= 0 && v >= 0 && u < cfg.q && v < cfg.q && u + v <= cfg.q - 2 + edge;
+}
 function inQuad(x, y, qd) {
   const [x0, x1] = quadRange(qd.x), [y0, y1] = quadRange(qd.y);
-  return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+  return x >= x0 && x <= x1 && y >= y0 && y <= y1 && validTile(x, y);
 }
 function clampQuad(t, qd) {
   const [x0, x1] = quadRange(qd.x), [y0, y1] = quadRange(qd.y);
-  return { x: Math.min(x1, Math.max(x0, t.x)), y: Math.min(y1, Math.max(y0, t.y)) };
+  let x = Math.min(x1, Math.max(x0, t.x)), y = Math.min(y1, Math.max(y0, t.y));
+  // Clicked past the diagonal wall: walk back toward the center until we're on a real tile.
+  while (!validTile(x, y)) {
+    if (Math.abs(x - cfg.q) >= Math.abs(y - cfg.q)) x -= Math.sign(x - cfg.q);
+    else y -= Math.sign(y - cfg.q);
+  }
+  return { x, y };
 }
 function quadCenter(qd) {
   const [x0] = quadRange(qd.x), [y0] = quadRange(qd.y);
@@ -145,11 +157,14 @@ function distToZone(p, o) {
 function newPattern() {
   const [x0] = quadRange(s.quad.x), [y0] = quadRange(s.quad.y);
   const lanes = cfg.q / cfg.w, reach = speed() * cfg.interval;
-  let o, tries = 0;
-  do {
+  const zoneValid = o => [0, 1].every(i => [0, 1].every(j => validTile(o.c + i * (cfg.w - 1), o.r + j * (cfg.w - 1))));
+  let o;
+  for (let i = 0; i < 600; i++) {
     o = { c: x0 + rnd(lanes) * cfg.w, r: y0 + rnd(lanes) * cfg.w };
-    tries++;
-  } while (tries < 300 && (inSafe(s.player.x, s.player.y, o) || (cfg.fair && distToZone(s.player, o) > reach)));
+    // Drop the fairness constraint if we somehow can't satisfy it, rather than looping forever.
+    const fair = cfg.fair && i < 400;
+    if (zoneValid(o) && !inSafe(s.player.x, s.player.y, o) && (!fair || distToZone(s.player, o) <= reach)) break;
+  }
   s.orange = o;
   s.patternAt = now();
   s.clickedAt = null;
@@ -210,13 +225,13 @@ function startPools() {
   // Floor portal is chosen now but only revealed next tick, and never spawns on a pool.
   let p;
   do { p = { x: x0 + rnd(cfg.q), y: y0 + rnd(cfg.q) }; }
-  while (Math.max(Math.abs(p.x - s.player.x), Math.abs(p.y - s.player.y)) < 2);
+  while (!validTile(p.x, p.y) || Math.max(Math.abs(p.x - s.player.x), Math.abs(p.y - s.player.y)) < 2);
   s.portal = p;
   s.pools.clear();
-  const n = Math.round(cfg.q * cfg.q * 0.3);
+  const n = Math.round(cfg.q * cfg.q * 0.25);
   while (s.pools.size < n) {
     const x = x0 + rnd(cfg.q), y = y0 + rnd(cfg.q);
-    if (x !== p.x || y !== p.y) s.pools.add(key(x, y));
+    if (validTile(x, y) && (x !== p.x || y !== p.y)) s.pools.add(key(x, y));
   }
   s.poolsTick = s.tick;
   s.portalTick = s.tick + 1;
@@ -316,6 +331,7 @@ function draw() {
   // floor
   for (let x = 0; x < G; x++) for (let y = 0; y < G; y++) {
     if (x === Q || y === Q) { fillTile(x, y, '#26221d'); continue; }
+    if (!validTile(x, y)) continue;
     const active = inQuad(x, y, s.quad);
     const checker = (x + y) % 2 === 0;
     fillTile(x, y, active ? (checker ? '#4a5641' : '#434e3a') : (checker ? '#333a2d' : '#2f3529'));
@@ -326,6 +342,7 @@ function draw() {
   if (cfg.guides && s.orange) {
     const [x0, x1] = quadRange(s.quad.x), [y0, y1] = quadRange(s.quad.y);
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+      if (!validTile(x, y)) continue;
       const inC = x >= s.orange.c && x < s.orange.c + cfg.w, inR = y >= s.orange.r && y < s.orange.r + cfg.w;
       if (inC || inR) fillTile(x, y, inC && inR ? 'rgba(255,154,46,.35)' : 'rgba(255,154,46,.13)');
     }
@@ -362,13 +379,14 @@ function draw() {
       const prog = Math.min(1, age / 220), a = .6 * (1 - age / 550);
       const [x0, x1] = quadRange(f.quad.x), [y0, y1] = quadRange(f.quad.y);
       for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+      if (!validTile(x, y)) continue;
         const colHit = !(x >= f.o.c && x < f.o.c + cfg.w) && Math.abs(y - Q) <= prog * Q;
         const rowHit = !(y >= f.o.r && y < f.o.r + cfg.w) && Math.abs(x - Q) <= prog * Q;
         if (colHit || rowHit) fillTile(x, y, `rgba(170,60,255,${a})`);
       }
     } else if (f.type === 'barrage' && age < 700) {
       const [x0, x1] = quadRange(f.quad.x), [y0, y1] = quadRange(f.quad.y);
-      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) fillTile(x, y, `rgba(230,60,120,${.65 * (1 - age / 700)})`);
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) if (validTile(x, y)) fillTile(x, y, `rgba(230,60,120,${.65 * (1 - age / 700)})`);
     } else if (f.type === 'reveal' && age < 1000) {
       ctx.setLineDash([4, 3]); ctx.strokeStyle = `rgba(79,209,139,${1 - age / 1000})`; ctx.lineWidth = 2;
       ctx.beginPath();
