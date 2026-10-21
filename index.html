@@ -324,7 +324,9 @@ function updateCamera(t) {
   // the camera does not change the zoom (that read as a weird warping effect).
   const R = cfg.q + 1.5;
   const fit = Math.min((L.W - 16) / (2 * R), (L.H - 20) / (R + 2.2));
-  L.S = fit * cam.zoom;
+  // Tilting more top-down stretches the floor vertically, which reads as zooming in. Like OSRS, pull the
+  // camera back as it tilts up: this keeps the on-screen area of a tile constant (width × height ∝ S² · pitch).
+  L.S = fit * cam.zoom * Math.sqrt(CAM0.pitch / cam.pitch);
   L.tw = L.S * Math.SQRT2; L.th = L.tw * cam.pitch;
   // Camera is locked on the character, like OSRS.
   const pp = playerPos(t);
