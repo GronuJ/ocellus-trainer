@@ -53,7 +53,7 @@
     <span>Teleports <b id="sTele">0/0</b></span>
     <span>Pool hits <b id="sPools">0</b></span>
   </div>
-  <span id="msg">Press Start (Space)</span>
+  <span id="msg"></span>
 </header>
 <main><canvas id="c"></canvas></main>
 <div class="controls">
@@ -78,11 +78,6 @@
   </select></label>
   <label title="New safe zone is always reachable in time if you click instantly"><input type="checkbox" id="fair" checked> Fair spawns</label>
   <label title="Training wheels: shade the orange lanes"><input type="checkbox" id="guides"> Guides</label>
-  <span title="Camera follows you: middle-drag, WASD or arrow keys to rotate/tilt, scroll or +/− to zoom, C to reset">
-    <button id="camL" aria-label="Rotate camera left">↺ Rotate</button>
-    <button id="camR" aria-label="Rotate camera right">Rotate ↻</button>
-    <button id="camReset">Reset cam</button>
-  </span>
   <button id="resetStats">Reset stats</button>
   <details>
     <summary>How it works</summary>
@@ -146,7 +141,7 @@ function resetGame() {
     pools: new Set(), poolsTick: -1, portal: null, portalTick: -1, barrageTick: -1,
     fx: [], hover: null,
   };
-  setMsg('Press Start (Space). You can walk around while paused.');
+  setMsg('You can walk around while paused.');
 }
 
 const key = (x, y) => x + ',' + y;
@@ -480,6 +475,22 @@ function draw() {
       ctx.fillText(f.dmg, cx, y + 1); ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
     }
   }
+  // start / pause screen
+  if (s.phase === 'idle') {
+    const started = st.waves > 0 || st.teleTries > 0;
+    const title = started ? 'Press SPACEBAR to resume' : 'Press SPACEBAR to start';
+    const size = Math.max(20, Math.min(42, L.W / 20)), y = L.H * .2;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `bold ${size}px system-ui`;
+    const bw = Math.min(L.W - 32, ctx.measureText(title).width + 60);
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(L.W / 2 - bw / 2, y - size * 1.1, bw, size * 2.6);
+    ctx.globalAlpha = .75 + .25 * Math.sin(t / 300);
+    ctx.fillStyle = '#ff9a2e'; ctx.fillText(title, L.W / 2, y);
+    ctx.globalAlpha = 1;
+    ctx.font = `${size * .4}px system-ui`; ctx.fillStyle = '#e8dcc0';
+    ctx.fillText('Click to walk · WASD / arrows / middle-drag to move the camera · scroll to zoom', L.W / 2, y + size * .95);
+    ctx.textBaseline = 'alphabetic';
+  }
   s.fx = s.fx.filter(f => t - f.t < 1200);
 }
 
@@ -632,9 +643,6 @@ function keyCamera(dt) {
   if (keys.has('ArrowDown') || keys.has('KeyS')) cam.pitch -= dt * 0.6;
   clampCam();
 }
-$('camL').onclick = () => { cam.yaw -= Math.PI / 4; };
-$('camR').onclick = () => { cam.yaw += Math.PI / 4; };
-$('camReset').onclick = () => Object.assign(cam, CAM0);
 $('start').onclick = () => (s.phase === 'idle' ? start() : pause());
 $('resetStats').onclick = () => { resetStats(); updateHUD(); };
 $('run').onchange = e => { cfg.run = e.target.checked; };
