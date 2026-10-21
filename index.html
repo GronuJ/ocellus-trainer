@@ -60,8 +60,8 @@
   <button id="start">Start</button>
   <label><input type="checkbox" id="run" checked> Run (R)</label>
   <label>Wave every <select id="interval">
-    <option value="2" selected>2 ticks</option><option value="3">3 ticks</option>
-    <option value="4">4 ticks</option><option value="5">5 ticks</option>
+    <option value="2">2 ticks</option><option value="3">3 ticks</option>
+    <option value="4" selected>4 ticks</option><option value="5">5 ticks</option>
   </select></label>
   <label>Waves per quadrant <select id="sets">
     <option>3</option><option selected>4</option><option>5</option><option>6</option><option>8</option>
@@ -78,6 +78,11 @@
   </select></label>
   <label title="New safe zone is always reachable in time if you click instantly"><input type="checkbox" id="fair" checked> Fair spawns</label>
   <label title="Training wheels: shade the orange lanes"><input type="checkbox" id="guides"> Guides</label>
+  <span title="Camera: right-drag or arrow keys to rotate/tilt, scroll or +/− to zoom, C to reset">
+    <button id="camL" aria-label="Rotate camera left">↺ Rotate</button>
+    <button id="camR" aria-label="Rotate camera right">Rotate ↻</button>
+    <button id="camReset">Reset cam</button>
+  </span>
   <button id="resetStats">Reset stats</button>
   <details>
     <summary>How it works</summary>
@@ -85,6 +90,7 @@
       The orange portal on each edge doesn't fire, so the only safe spot is where the two orange lanes cross.
       Click to move there before the wave fires. Movement works like OSRS: one tick is 600&nbsp;ms, running moves 2 tiles
       per tick, walking moves 1, diagonals come first, and clicks take effect on the next tick.</p>
+    <p>Camera: right-drag or arrow keys rotate and tilt, scroll or +/− zooms (the camera follows you when zoomed in), and C resets it.</p>
     <p>After a few waves, purple pools appear on the floor (you get hit for ending a tick on one),
       followed by an orange floor portal. Step on it before the barrage to teleport to a new quadrant.</p>
   </details>
@@ -92,7 +98,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const cv = $('c'), ctx = cv.getContext('2d');
-const cfg = { q: 12, w: 2, interval: 2, sets: 4, portalTicks: 4, run: true, fair: true, guides: false, tickMs: 600 };
+const cfg = { q: 12, w: 2, interval: 4, sets: 4, portalTicks: 4, run: true, fair: true, guides: false, tickMs: 600 };
 const rnd = n => Math.floor(Math.random() * n);
 const now = () => performance.now();
 
@@ -299,22 +305,45 @@ function updateHUD() {
 }
 
 // ---------- rendering ----------
-const L = { tw: 40, th: 20, ox: 0, oy: 0, W: 0, H: 0 };
+// Camera: yaw rotates the arena, pitch squashes the vertical axis (0.5 = classic isometric), zoom scales.
+const CAM0 = { yaw: Math.PI / 4, pitch: 0.5, zoom: 1 };
+const cam = { ...CAM0 };
+const L = { S: 20, tw: 40, th: 20, ox: 0, oy: 0, W: 0, H: 0, tx: 0, ty: 0 };
 function layout() {
   const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   cv.width = r.width * dpr; cv.height = r.height * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const G = 2 * cfg.q + 1;
   L.W = r.width; L.H = r.height;
-  L.tw = Math.min((L.W - 16) / G, (L.H - 20) / (G / 2 + 1.4));
-  L.th = L.tw / 2;
-  L.ox = L.W / 2;
-  L.oy = L.tw * 1.4;
 }
-const iso = (x, y) => [L.ox + (x - y) * L.tw / 2, L.oy + (x + y) * L.th / 2];
+function rot(a, b) {
+  const c = Math.cos(cam.yaw), s_ = Math.sin(cam.yaw);
+  return [a * c - b * s_, a * s_ + b * c];
+}
+function updateCamera(t) {
+  const G = 2 * cfg.q + 1, C = G / 2, h = C, cut = cfg.q - Math.round(cfg.q / 3);
+  // Fit the octagon outline for the current yaw/pitch, so rotating never pushes the arena off screen.
+  let ex = 0, ey = 0;
+  for (const [a, b] of [[h, h - cut], [h - cut, h]]) for (const sa of [1, -1]) for (const sb of [1, -1]) {
+    const [X, Y] = rot(sa * a, sb * b);
+    ex = Math.max(ex, Math.abs(X)); ey = Math.max(ey, Math.abs(Y));
+  }
+  const fit = Math.min((L.W - 16) / (2 * ex), (L.H - 20) / (2 * ey * cam.pitch + 2.2));
+  L.S = fit * cam.zoom;
+  L.tw = L.S * Math.SQRT2; L.th = L.tw * cam.pitch;
+  // Zoomed out you see the whole arena; zooming in drifts the camera onto your character like OSRS.
+  const pp = playerPos(t), follow = Math.min(1, (cam.zoom - 1) * 1.5);
+  L.tx = C + (pp.x + .5 - C) * follow; L.ty = C + (pp.y + .5 - C) * follow;
+  L.ox = L.W / 2; L.oy = L.H / 2 + L.tw * .5;
+}
+const screenY = (x, y) => rot(x - L.tx, y - L.ty)[1];  // depth for painter's sorting
+function iso(x, y) {
+  const [X, Y] = rot(x - L.tx, y - L.ty);
+  return [L.ox + X * L.S, L.oy + Y * L.S * cam.pitch];
+}
 function pick(mx, my) {
-  const u = (mx - L.ox) / (L.tw / 2), v = (my - L.oy) / (L.th / 2);
-  return { x: Math.floor((u + v) / 2), y: Math.floor((v - u) / 2) };
+  const X = (mx - L.ox) / L.S, Y = (my - L.oy) / (L.S * cam.pitch);
+  const c = Math.cos(cam.yaw), s_ = Math.sin(cam.yaw);
+  return { x: Math.floor(X * c + Y * s_ + L.tx), y: Math.floor(-X * s_ + Y * c + L.ty) };
 }
 function tilePath(x, y, inset = 0) {
   const pts = [[x + inset, y + inset], [x + 1 - inset, y + inset], [x + 1 - inset, y + 1 - inset], [x + inset, y + 1 - inset]];
@@ -407,13 +436,13 @@ function draw() {
     const charge = 1 - Math.max(0, (s.waveTick - s.tick) * cfg.tickMs - (t - s.tickAt)) / ((cfg.interval + 1) * cfg.tickMs);
     for (let k = 0; k < Q / cfg.w; k++) {
       const cx = x0 + k * cfg.w, ry = y0 + k * cfg.w;
-      objs.push({ d: cx + cfg.w / 2 + Q + .5, f: () => portal(cx + cfg.w / 2, Q + .5, cx === s.orange.c, charge) });
-      objs.push({ d: Q + .5 + ry + cfg.w / 2, f: () => portal(Q + .5, ry + cfg.w / 2, ry === s.orange.r, charge) });
+      objs.push({ d: screenY(cx + cfg.w / 2, Q + .5), f: () => portal(cx + cfg.w / 2, Q + .5, cx === s.orange.c, charge) });
+      objs.push({ d: screenY(Q + .5, ry + cfg.w / 2), f: () => portal(Q + .5, ry + cfg.w / 2, ry === s.orange.r, charge) });
     }
   }
-  objs.push({ d: 2 * Q + 1, f: () => boss(t) });
+  objs.push({ d: screenY(Q + .5, Q + .5), f: () => boss(t) });
   const pp = playerPos(t);
-  objs.push({ d: pp.x + pp.y + 1, f: () => player(pp) });
+  objs.push({ d: screenY(pp.x + .5, pp.y + .5), f: () => player(pp) });
   objs.sort((a, b) => a.d - b.d).forEach(o => o.f());
 
   // countdown above the boss
@@ -488,8 +517,25 @@ function player(p) {
 
 // ---------- input & loop ----------
 function canvasXY(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
-cv.addEventListener('pointermove', e => { s.hover = pick(...canvasXY(e)); });
+// Camera: right- or middle-drag rotates/tilts (like OSRS middle mouse), wheel zooms, arrow keys too.
+let drag = null;
+const clampCam = () => {
+  cam.pitch = Math.min(0.9, Math.max(0.28, cam.pitch));
+  cam.zoom = Math.min(3, Math.max(1, cam.zoom));
+};
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => { e.preventDefault(); cam.zoom *= Math.exp(-e.deltaY * 0.0015); clampCam(); }, { passive: false });
+window.addEventListener('pointerup', () => { drag = null; });
+cv.addEventListener('pointermove', e => {
+  const [mx, my] = canvasXY(e);
+  if (drag) {
+    cam.yaw += (mx - drag.x) * 0.008; cam.pitch += (my - drag.y) * 0.003; clampCam();
+    drag = { x: mx, y: my };
+  }
+  s.hover = pick(mx, my);
+});
 cv.addEventListener('pointerdown', e => {
+  if (e.button === 1 || e.button === 2) { e.preventDefault(); drag = { x: canvasXY(e)[0], y: canvasXY(e)[1] }; return; }
   const [mx, my] = canvasXY(e), raw = pick(mx, my), t = clampQuad(raw, s.quad);
   s.queued = t;
   s.fx.push({ type: 'click', t: now(), sx: mx, sy: my });
@@ -499,7 +545,24 @@ window.addEventListener('keydown', e => {
   if (e.target.tagName === 'SELECT') return;
   if (e.code === 'Space') { e.preventDefault(); s.phase === 'idle' ? start() : pause(); }
   if (e.code === 'KeyR') { cfg.run = !cfg.run; $('run').checked = cfg.run; }
+  if (e.key === '+' || e.key === '=') { cam.zoom *= 1.15; clampCam(); }
+  if (e.key === '-') { cam.zoom /= 1.15; clampCam(); }
+  if (e.code === 'KeyC') Object.assign(cam, CAM0);
+  if (e.code.startsWith('Arrow')) { e.preventDefault(); keys.add(e.code); }
 });
+const keys = new Set();
+window.addEventListener('keyup', e => keys.delete(e.code));
+window.addEventListener('blur', () => keys.clear());
+function keyCamera(dt) {
+  if (keys.has('ArrowLeft')) cam.yaw -= dt * 2.2;
+  if (keys.has('ArrowRight')) cam.yaw += dt * 2.2;
+  if (keys.has('ArrowUp')) cam.pitch += dt * 0.6;
+  if (keys.has('ArrowDown')) cam.pitch -= dt * 0.6;
+  clampCam();
+}
+$('camL').onclick = () => { cam.yaw -= Math.PI / 4; };
+$('camR').onclick = () => { cam.yaw += Math.PI / 4; };
+$('camReset').onclick = () => Object.assign(cam, CAM0);
 $('start').onclick = () => (s.phase === 'idle' ? start() : pause());
 $('resetStats').onclick = () => { resetStats(); updateHUD(); };
 $('run').onchange = e => { cfg.run = e.target.checked; };
@@ -515,8 +578,11 @@ for (const id of ['interval', 'sets', 'portalTicks', 'w', 'q']) {
 }
 window.addEventListener('resize', layout);
 
+let lastFrame = now();
 function loop() {
   const t = now();
+  keyCamera(Math.min(0.05, (t - lastFrame) / 1000)); lastFrame = t;
+  updateCamera(t);
   // If the tab was hidden, don't fast-forward through dozens of missed ticks.
   if (t - s.tickAt > 5 * cfg.tickMs) s.tickAt = t;
   while (t - s.tickAt >= cfg.tickMs) { s.tickAt += cfg.tickMs; onTick(); }
