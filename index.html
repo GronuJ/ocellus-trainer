@@ -320,14 +320,10 @@ function rot(a, b) {
   return [a * c - b * s_, a * s_ + b * c];
 }
 function updateCamera(t) {
-  const G = 2 * cfg.q + 1, C = G / 2, h = C, cut = cfg.q - Math.round(cfg.q / 3);
-  // Fit the octagon outline for the current yaw/pitch, so rotating never pushes the arena off screen.
-  let ex = 0, ey = 0;
-  for (const [a, b] of [[h, h - cut], [h - cut, h]]) for (const sa of [1, -1]) for (const sb of [1, -1]) {
-    const [X, Y] = rot(sa * a, sb * b);
-    ex = Math.max(ex, Math.abs(X)); ey = Math.max(ey, Math.abs(Y));
-  }
-  const fit = Math.min((L.W - 16) / (2 * ex), (L.H - 20) / (2 * ey * cam.pitch + 2.2));
+  // Base scale depends only on the window and arena size, never on yaw/pitch, so rotating or tilting
+  // the camera does not change the zoom (that read as a weird warping effect).
+  const R = cfg.q + 1.5;
+  const fit = Math.min((L.W - 16) / (2 * R), (L.H - 20) / (R + 2.2));
   L.S = fit * cam.zoom;
   L.tw = L.S * Math.SQRT2; L.th = L.tw * cam.pitch;
   // Camera is locked on the character, like OSRS.
@@ -552,7 +548,7 @@ function rock(x, y, sz) {
 }
 
 function portal(x, y, orange, charge) {
-  const [cx, cy0] = iso(x, y), cy = cy0 - L.th * .9;
+  const [cx, cy0] = iso(x, y), cy = cy0 - hScale() * .73;
   const rx = L.tw * .22 * cfg.w, ry = L.tw * .38;
   const pulse = orange ? 1 : 1 + .08 * Math.sin(now() / (60 + 140 * (1 - charge)));
   const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, ry * pulse);
@@ -565,7 +561,7 @@ function portal(x, y, orange, charge) {
 }
 
 function boss(t) {
-  const [cx, cy0] = iso(cfg.q + .5, cfg.q + .5), cy = cy0 - L.tw * .45, r = L.tw * .5;
+  const [cx, cy0] = iso(cfg.q + .5, cfg.q + .5), cy = cy0 - hScale() * .73, r = L.tw * .5;
   ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(cx, cy0, r, r / 2, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#3a1d3f'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#e9d9a6'; ctx.beginPath(); ctx.ellipse(cx, cy, r * .6, r * .4, 0, 0, Math.PI * 2); ctx.fill();
@@ -582,7 +578,7 @@ function playerPos(t) {
 }
 
 function player(p) {
-  const [cx, cy] = iso(p.x + .5, p.y + .5), h = L.tw * .75;
+  const [cx, cy] = iso(p.x + .5, p.y + .5), h = hScale() * 1.22;
   ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(cx, cy, L.tw * .2, L.th * .2, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#6b4a2b'; ctx.fillRect(cx - L.tw * .1, cy - h, L.tw * .2, h * .75);
   ctx.fillStyle = '#e2b48c'; ctx.beginPath(); ctx.arc(cx, cy - h - L.tw * .06, L.tw * .11, 0, Math.PI * 2); ctx.fill();
