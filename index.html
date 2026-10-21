@@ -612,7 +612,7 @@ window.addEventListener('pointerup', () => { drag = null; });
 cv.addEventListener('pointermove', e => {
   const [mx, my] = canvasXY(e);
   if (drag) {
-    cam.yaw += (mx - drag.x) * 0.008; cam.pitch += (my - drag.y) * 0.003; clampCam();
+    cam.yaw -= (mx - drag.x) * 0.008; cam.pitch -= (my - drag.y) * 0.003; clampCam();
     drag = { x: mx, y: my };
   }
   s.hover = pick(mx, my);
@@ -637,8 +637,8 @@ const keys = new Set();
 window.addEventListener('keyup', e => keys.delete(e.code));
 window.addEventListener('blur', () => keys.clear());
 function keyCamera(dt) {
-  if (keys.has('ArrowLeft') || keys.has('KeyA')) cam.yaw -= dt * 2.2;
-  if (keys.has('ArrowRight') || keys.has('KeyD')) cam.yaw += dt * 2.2;
+  if (keys.has('ArrowLeft') || keys.has('KeyA')) cam.yaw += dt * 2.2;
+  if (keys.has('ArrowRight') || keys.has('KeyD')) cam.yaw -= dt * 2.2;
   if (keys.has('ArrowUp') || keys.has('KeyW')) cam.pitch += dt * 0.6;
   if (keys.has('ArrowDown') || keys.has('KeyS')) cam.pitch -= dt * 0.6;
   clampCam();
