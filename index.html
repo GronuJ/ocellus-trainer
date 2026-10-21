@@ -509,7 +509,8 @@ function scenery() {
   return (sceneCache = { q: cfg.q, ground, walls, trees, rocks });
 }
 // Vertical size of "height" on screen shrinks as the camera looks more top-down.
-const hScale = () => L.S * Math.sqrt(1 - cam.pitch * cam.pitch);
+// Floored so the player, trees and walls stay visible in full top-down view.
+const hScale = () => L.S * Math.max(0.3, Math.sqrt(1 - cam.pitch * cam.pitch));
 
 function block(x, y, hu) {
   const H = hu * hScale(), c = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]];
@@ -591,7 +592,7 @@ function canvasXY(e) { const r = cv.getBoundingClientRect(); return [e.clientX -
 // Camera: middle-drag (OSRS style) or right-drag rotates/tilts, WASD or arrow keys too, wheel zooms.
 let drag = null;
 const clampCam = () => {
-  cam.pitch = Math.min(0.72, Math.max(0.42, cam.pitch));  // roughly 25°–46° camera elevation
+  cam.pitch = Math.min(1, Math.max(0.42, cam.pitch));  // from ~25° elevation up to straight top-down
   cam.zoom = Math.min(3, Math.max(0.6, cam.zoom));
 };
 cv.addEventListener('contextmenu', e => e.preventDefault());
