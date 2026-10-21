@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ocellus Safe Tile Trainer</title>
+<style>
+  :root {
+    --bg: #14130f; --panel: #2b2620; --edge: #4a4034; --text: #e8dcc0;
+    --muted: #a99b7e; --accent: #ff9a2e; --good: #4fd18b; --bad: #e0483e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+    padding: 8px 16px; background: var(--panel); border-bottom: 2px solid var(--edge);
+  }
+  h1 { font-size: 16px; margin: 0; color: var(--accent); letter-spacing: .3px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-variant-numeric: tabular-nums; }
+  .stats b { color: #fff; }
+  #msg { margin-left: auto; color: var(--muted); }
+  main { flex: 1; position: relative; min-height: 0; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: pointer; }
+  .controls {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+    padding: 8px 16px; background: var(--panel); border-top: 2px solid var(--edge);
+  }
+  button {
+    background: #5a4a33; color: #fff; border: 1px solid #8a7350; border-radius: 4px;
+    padding: 6px 14px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #6d5a3e; }
+  #start { background: #7a4f14; border-color: var(--accent); min-width: 90px; }
+  label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+  select { background: #1d1a15; color: var(--text); border: 1px solid var(--edge); border-radius: 4px; padding: 3px; font: inherit; }
+  details { color: var(--muted); max-width: 640px; }
+  details summary { cursor: pointer; color: var(--text); }
+  details p { margin: 6px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ocellus Safe Tile Trainer</h1>
+  <div class="stats">
+    <span>Dodged <b id="sDodged">0/0</b></span>
+    <span>Streak <b id="sStreak">0</b> (best <b id="sBest">0</b>)</span>
+    <span>Avg reaction <b id="sReact">–</b></span>
+    <span>Teleports <b id="sTele">0/0</b></span>
+    <span>Pool hits <b id="sPools">0</b></span>
+  </div>
+  <span id="msg">Press Start (Space)</span>
+</header>
+<main><canvas id="c"></canvas></main>
+<div class="controls">
+  <button id="start">Start</button>
+  <label><input type="checkbox" id="run" checked> Run (R)</label>
+  <label>Wave every <select id="interval">
+    <option value="2" selected>2 ticks</option><option value="3">3 ticks</option>
+    <option value="4">4 ticks</option><option value="5">5 ticks</option>
+  </select></label>
+  <label>Waves per quadrant <select id="sets">
+    <option>3</option><option selected>4</option><option>5</option><option>6</option><option>8</option>
+  </select></label>
+  <label>Portal time <select id="portalTicks">
+    <option value="3">3 ticks</option><option value="4" selected>4 ticks</option>
+    <option value="5">5 ticks</option><option value="6">6 ticks</option>
+  </select></label>
+  <label>Safe zone <select id="w">
+    <option value="2" selected>2×2</option><option value="1">1×1</option>
+  </select></label>
+  <label>Quadrant <select id="q">
+    <option value="12" selected>12×12 (6 portals)</option><option value="10">10×10 (5 portals)</option><option value="8">8×8 (4 portals)</option>
+  </select></label>
+  <label title="New safe zone is always reachable in time if you click instantly"><input type="checkbox" id="fair" checked> Fair spawns</label>
+  <label title="Training wheels: shade the orange lanes"><input type="checkbox" id="guides"> Guides</label>
+  <button id="resetStats">Reset stats</button>
+  <details>
+    <summary>How it works</summary>
+    <p>You're in one quadrant next to Ocellus. Purple portals on its two inner edges fire waves along their lanes.
+      The orange portal on each edge doesn't fire, so the only safe spot is where the two orange lanes cross.
+      Click to move there before the wave fires. Movement works like OSRS: one tick is 600&nbsp;ms, running moves 2 tiles
+      per tick, walking moves 1, diagonals come first, and clicks take effect on the next tick.</p>
+    <p>After a few waves, purple pools appear on the floor (you get hit for ending a tick on one),
+      followed by an orange floor portal. Step on it before the barrage to teleport to a new quadrant.</p>
+  </details>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('c'), ctx = cv.getContext('2d');
+const cfg = { q: 12, w: 2, interval: 2, sets: 4, portalTicks: 4, run: true, fair: true, guides: false, tickMs: 600 };
+const rnd = n => Math.floor(Math.random() * n);
+const now = () => performance.now();
+
+let best = 0;
+try { best = +localStorage.getItem('ocellusBest') || 0; } catch (e) {}
+let st, s;
+
+function resetStats() {
+  st = { waves: 0, dodged: 0, streak: 0, reactSum: 0, reactN: 0, tele: 0, teleTries: 0, pools: 0 };
+}
+
+function quadRange(qi) { return qi === 0 ? [0, cfg.q - 1] : [cfg.q + 1, 2 * cfg.q]; }
+function inQuad(x, y, qd) {
+  const [x0, x1] = quadRange(qd.x), [y0, y1] = quadRange(qd.y);
+  return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+}
+function clampQuad(t, qd) {
+  const [x0, x1] = quadRange(qd.x), [y0, y1] = quadRange(qd.y);
+  return { x: Math.min(x1, Math.max(x0, t.x)), y: Math.min(y1, Math.max(y0, t.y)) };
+}
+function quadCenter(qd) {
+  const [x0] = quadRange(qd.x), [y0] = quadRange(qd.y);
+  return { x: x0 + Math.floor(cfg.q / 2), y: y0 + Math.floor(cfg.q / 2) };
+}
+
+function resetGame() {
+  const quad = { x: 1, y: 1 };  // bottom quadrant in this view, like the screenshot
+  const p = quadCenter(quad);
+  s = {
+    phase: 'idle', tick: 0, tickAt: now(), quad,
+    player: p, from: [p], dest: null, queued: null,
+    orange: null, waveTick: -1, wavesDone: 0, patternAt: 0, clickedAt: null,
+    pools: new Set(), poolsTick: -1, portal: null, portalTick: -1, barrageTick: -1,
+    fx: [], hover: null,
+  };
+  setMsg('Press Start (Space). You can walk around while paused.');
+}
+
+const key = (x, y) => x + ',' + y;
+const inSafe = (x, y, o) => o && x >= o.c && x < o.c + cfg.w && y >= o.r && y < o.r + cfg.w;
+const speed = () => cfg.run ? 2 : 1;
+
+// Distance in ticks-of-movement terms: OSRS lets you move diagonally, so Chebyshev distance is what counts.
+function distToZone(p, o) {
+  const dx = Math.max(o.c - p.x, 0, p.x - (o.c + cfg.w - 1));
+  const dy = Math.max(o.r - p.y, 0, p.y - (o.r + cfg.w - 1));
+  return Math.max(dx, dy);
+}
+
+function newPattern() {
+  const [x0] = quadRange(s.quad.x), [y0] = quadRange(s.quad.y);
+  const lanes = cfg.q / cfg.w, reach = speed() * cfg.interval;
+  let o, tries = 0;
+  do {
+    o = { c: x0 + rnd(lanes) * cfg.w, r: y0 + rnd(lanes) * cfg.w };
+    tries++;
+  } while (tries < 300 && (inSafe(s.player.x, s.player.y, o) || (cfg.fair && distToZone(s.player, o) > reach)));
+  s.orange = o;
+  s.patternAt = now();
+  s.clickedAt = null;
+}
+
+function start() {
+  s.phase = 'waves';
+  s.wavesDone = 0;
+  s.pools.clear(); s.portal = null;
+  newPattern();
+  s.waveTick = s.tick + cfg.interval + 1;  // one extra tick for the very first pattern
+  $('start').textContent = 'Pause';
+  setMsg('Get to the orange crossing!');
+}
+
+function pause() {
+  s.phase = 'idle'; s.orange = null; s.pools.clear(); s.portal = null;
+  $('start').textContent = 'Start';
+  setMsg('Paused');
+}
+
+function onTick() {
+  s.tick++;
+  if (s.queued) { s.dest = s.queued; s.queued = null; }
+  // OSRS-style movement: step diagonally while both axes differ, then straight.
+  s.from = [{ ...s.player }];
+  for (let i = 0; i < speed() && s.dest; i++) {
+    const dx = Math.sign(s.dest.x - s.player.x), dy = Math.sign(s.dest.y - s.player.y);
+    if (!dx && !dy) break;
+    s.player = { x: s.player.x + dx, y: s.player.y + dy };
+    s.from.push({ ...s.player });
+  }
+  if (s.dest && s.player.x === s.dest.x && s.player.y === s.dest.y) s.dest = null;
+
+  if (s.phase === 'waves' && s.tick === s.waveTick) resolveWave();
+  else if (s.phase === 'pools' || s.phase === 'portal') poolTick();
+  updateHUD();
+}
+
+function resolveWave() {
+  const o = s.orange, ok = inSafe(s.player.x, s.player.y, o);
+  st.waves++;
+  if (ok) {
+    st.dodged++; bump();
+    if (s.clickedAt) { st.reactSum += s.clickedAt - s.patternAt; st.reactN++; }
+  } else st.streak = 0;
+  s.fx.push({ type: 'wave', t: now(), o, quad: { ...s.quad } });
+  splat(ok ? 0 : 20 + rnd(25));
+  if (!ok) s.fx.push({ type: 'reveal', t: now(), o });
+  s.wavesDone++;
+  if (s.wavesDone >= cfg.sets) startPools();
+  else { newPattern(); s.waveTick = s.tick + cfg.interval; }
+}
+
+function startPools() {
+  s.phase = 'pools'; s.orange = null;
+  const [x0] = quadRange(s.quad.x), [y0] = quadRange(s.quad.y);
+  // Floor portal is chosen now but only revealed next tick, and never spawns on a pool.
+  let p;
+  do { p = { x: x0 + rnd(cfg.q), y: y0 + rnd(cfg.q) }; }
+  while (Math.max(Math.abs(p.x - s.player.x), Math.abs(p.y - s.player.y)) < 2);
+  s.portal = p;
+  s.pools.clear();
+  const n = Math.round(cfg.q * cfg.q * 0.3);
+  while (s.pools.size < n) {
+    const x = x0 + rnd(cfg.q), y = y0 + rnd(cfg.q);
+    if (x !== p.x || y !== p.y) s.pools.add(key(x, y));
+  }
+  s.poolsTick = s.tick;
+  s.portalTick = s.tick + 1;
+  s.barrageTick = s.portalTick + cfg.portalTicks;
+  st.teleTries++;
+  setMsg('Pools! Wait for the orange floor portal…');
+}
+
+function poolTick() {
+  if (s.phase === 'pools' && s.tick >= s.portalTick) {
+    s.phase = 'portal';
+    setMsg('Step on the orange portal!');
+  }
+  if (s.phase === 'portal' && s.player.x === s.portal.x && s.player.y === s.portal.y) return teleport();
+  // Like most OSRS floor hazards, only the tile you end the tick on counts.
+  if (s.tick > s.poolsTick && s.pools.has(key(s.player.x, s.player.y))) {
+    st.pools++; st.streak = 0; splat(10 + rnd(15));
+  }
+  if (s.tick >= s.barrageTick) {
+    st.streak = 0;
+    s.fx.push({ type: 'barrage', t: now(), quad: { ...s.quad } });
+    splat(60 + rnd(30));
+    setMsg('Missed the portal, took the barrage.');
+    nextQuadrantWaves();
+  }
+}
+
+function teleport() {
+  const others = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }]
+    .filter(q => q.x !== s.quad.x || q.y !== s.quad.y);
+  const nq = others[rnd(others.length)];
+  // Land on the mirrored tile, so you stay the same distance from Ocellus.
+  const Q2 = 2 * cfg.q;
+  let { x, y } = s.player;
+  if (nq.x !== s.quad.x) x = Q2 - x;
+  if (nq.y !== s.quad.y) y = Q2 - y;
+  s.quad = nq;
+  s.player = { x, y }; s.from = [{ x, y }]; s.dest = null; s.queued = null;
+  st.tele++; bump();
+  s.fx.push({ type: 'tele', t: now(), x, y });
+  setMsg('Teleported. Next pattern incoming!');
+  nextQuadrantWaves();
+}
+
+function nextQuadrantWaves() {
+  s.pools.clear(); s.portal = null;
+  s.phase = 'waves'; s.wavesDone = 0;
+  newPattern();
+  s.waveTick = s.tick + cfg.interval + 1;
+}
+
+function bump() {
+  st.streak++;
+  if (st.streak > best) { best = st.streak; try { localStorage.setItem('ocellusBest', best); } catch (e) {} }
+}
+function splat(dmg) { s.fx.push({ type: 'splat', t: now(), x: s.player.x, y: s.player.y, dmg }); }
+function setMsg(t) { $('msg').textContent = t; }
+function updateHUD() {
+  $('sDodged').textContent = `${st.dodged}/${st.waves}` + (st.waves ? ` (${Math.round(100 * st.dodged / st.waves)}%)` : '');
+  $('sStreak').textContent = st.streak;
+  $('sBest').textContent = best;
+  $('sReact').textContent = st.reactN ? Math.round(st.reactSum / st.reactN) + ' ms' : '–';
+  $('sTele').textContent = `${st.tele}/${st.teleTries}`;
+  $('sPools').textContent = st.pools;
+}
+
+// ---------- rendering ----------
+const L = { tw: 40, th: 20, ox: 0, oy: 0, W: 0, H: 0 };
+function layout() {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const G = 2 * cfg.q + 1;
+  L.W = r.width; L.H = r.height;
+  L.tw = Math.min((L.W - 16) / G, (L.H - 20) / (G / 2 + 1.4));
+  L.th = L.tw / 2;
+  L.ox = L.W / 2;
+  L.oy = L.tw * 1.4;
+}
+const iso = (x, y) => [L.ox + (x - y) * L.tw / 2, L.oy + (x + y) * L.th / 2];
+function pick(mx, my) {
+  const u = (mx - L.ox) / (L.tw / 2), v = (my - L.oy) / (L.th / 2);
+  return { x: Math.floor((u + v) / 2), y: Math.floor((v - u) / 2) };
+}
+function tilePath(x, y, inset = 0) {
+  const pts = [[x + inset, y + inset], [x + 1 - inset, y + inset], [x + 1 - inset, y + 1 - inset], [x + inset, y + 1 - inset]];
+  ctx.beginPath();
+  pts.forEach(([a, b], i) => { const [sx, sy] = iso(a, b); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+  ctx.closePath();
+}
+function fillTile(x, y, color) { tilePath(x, y); ctx.fillStyle = color; ctx.fill(); }
+
+function draw() {
+  const t = now(), G = 2 * cfg.q + 1, Q = cfg.q;
+  ctx.clearRect(0, 0, L.W, L.H);
+
+  // floor
+  for (let x = 0; x < G; x++) for (let y = 0; y < G; y++) {
+    if (x === Q || y === Q) { fillTile(x, y, '#26221d'); continue; }
+    const active = inQuad(x, y, s.quad);
+    const checker = (x + y) % 2 === 0;
+    fillTile(x, y, active ? (checker ? '#4a5641' : '#434e3a') : (checker ? '#333a2d' : '#2f3529'));
+    tilePath(x, y); ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  // guide lanes
+  if (cfg.guides && s.orange) {
+    const [x0, x1] = quadRange(s.quad.x), [y0, y1] = quadRange(s.quad.y);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+      const inC = x >= s.orange.c && x < s.orange.c + cfg.w, inR = y >= s.orange.r && y < s.orange.r + cfg.w;
+      if (inC || inR) fillTile(x, y, inC && inR ? 'rgba(255,154,46,.35)' : 'rgba(255,154,46,.13)');
+    }
+  }
+
+  // pools
+  for (const k of s.pools) {
+    const [x, y] = k.split(',').map(Number);
+    const [cx, cy] = iso(x + .5, y + .5);
+    const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, L.tw * .45);
+    g.addColorStop(0, 'rgba(190,80,255,.95)'); g.addColorStop(.7, 'rgba(120,30,200,.75)'); g.addColorStop(1, 'rgba(90,20,160,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(cx, cy, L.tw * .45, L.th * .45, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // floor portal
+  if (s.portal && s.phase === 'portal') {
+    const [cx, cy] = iso(s.portal.x + .5, s.portal.y + .5);
+    const pulse = 1 + .12 * Math.sin(t / 90);
+    const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, L.tw * .5 * pulse);
+    g.addColorStop(0, '#fff3c4'); g.addColorStop(.4, '#ffa22e'); g.addColorStop(1, 'rgba(255,120,0,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(cx, cy, L.tw * .55 * pulse, L.th * .55 * pulse, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // hover, true tile and destination
+  if (s.hover && inQuad(s.hover.x, s.hover.y, s.quad)) {
+    tilePath(s.hover.x, s.hover.y); ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  tilePath(s.player.x, s.player.y, .04); ctx.strokeStyle = '#3fe0ff'; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // effects drawn on the floor
+  for (const f of s.fx) {
+    const age = t - f.t;
+    if (f.type === 'wave' && age < 550) {
+      const prog = Math.min(1, age / 220), a = .6 * (1 - age / 550);
+      const [x0, x1] = quadRange(f.quad.x), [y0, y1] = quadRange(f.quad.y);
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+        const colHit = !(x >= f.o.c && x < f.o.c + cfg.w) && Math.abs(y - Q) <= prog * Q;
+        const rowHit = !(y >= f.o.r && y < f.o.r + cfg.w) && Math.abs(x - Q) <= prog * Q;
+        if (colHit || rowHit) fillTile(x, y, `rgba(170,60,255,${a})`);
+      }
+    } else if (f.type === 'barrage' && age < 700) {
+      const [x0, x1] = quadRange(f.quad.x), [y0, y1] = quadRange(f.quad.y);
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) fillTile(x, y, `rgba(230,60,120,${.65 * (1 - age / 700)})`);
+    } else if (f.type === 'reveal' && age < 1000) {
+      ctx.setLineDash([4, 3]); ctx.strokeStyle = `rgba(79,209,139,${1 - age / 1000})`; ctx.lineWidth = 2;
+      ctx.beginPath();
+      [[f.o.c, f.o.r], [f.o.c + cfg.w, f.o.r], [f.o.c + cfg.w, f.o.r + cfg.w], [f.o.c, f.o.r + cfg.w]]
+        .forEach(([a, b], i) => { const [sx, sy] = iso(a, b); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+      ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+    } else if (f.type === 'tele' && age < 600) {
+      const [cx, cy] = iso(f.x + .5, f.y + .5), k = age / 600;
+      ctx.strokeStyle = `rgba(255,170,60,${1 - k})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(cx, cy, L.tw * (.3 + k), L.th * (.3 + k), 0, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  // objects with depth sorting (painter's algorithm on x+y)
+  const objs = [];
+  if (s.phase === 'waves' && s.orange) {
+    const [x0] = quadRange(s.quad.x), [y0] = quadRange(s.quad.y);
+    const charge = 1 - Math.max(0, (s.waveTick - s.tick) * cfg.tickMs - (t - s.tickAt)) / ((cfg.interval + 1) * cfg.tickMs);
+    for (let k = 0; k < Q / cfg.w; k++) {
+      const cx = x0 + k * cfg.w, ry = y0 + k * cfg.w;
+      objs.push({ d: cx + cfg.w / 2 + Q + .5, f: () => portal(cx + cfg.w / 2, Q + .5, cx === s.orange.c, charge) });
+      objs.push({ d: Q + .5 + ry + cfg.w / 2, f: () => portal(Q + .5, ry + cfg.w / 2, ry === s.orange.r, charge) });
+    }
+  }
+  objs.push({ d: 2 * Q + 1, f: () => boss(t) });
+  const pp = playerPos(t);
+  objs.push({ d: pp.x + pp.y + 1, f: () => player(pp) });
+  objs.sort((a, b) => a.d - b.d).forEach(o => o.f());
+
+  // countdown above the boss
+  const [bx, by] = iso(Q + .5, Q + .5);
+  let label = null;
+  if (s.phase === 'waves') label = s.waveTick - s.tick;
+  else if (s.phase === 'portal') label = 'TP ' + (s.barrageTick - s.tick);
+  if (label !== null) {
+    ctx.font = `bold ${Math.max(14, L.tw * .55)}px system-ui`; ctx.textAlign = 'center';
+    ctx.lineWidth = 4; ctx.strokeStyle = '#000'; ctx.strokeText(label, bx, by - L.tw * 1.2);
+    ctx.fillStyle = s.phase === 'portal' ? '#ffb347' : '#fff'; ctx.fillText(label, bx, by - L.tw * 1.2);
+  }
+
+  // overlay effects: click markers and hitsplats
+  for (const f of s.fx) {
+    const age = t - f.t;
+    if (f.type === 'click' && age < 350) {
+      const r = 6 * (1 - age / 700);
+      ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(f.sx - r, f.sy - r); ctx.lineTo(f.sx + r, f.sy + r);
+      ctx.moveTo(f.sx + r, f.sy - r); ctx.lineTo(f.sx - r, f.sy + r); ctx.stroke();
+    } else if (f.type === 'splat' && age < 1000) {
+      const [cx, cy] = iso(f.x + .5, f.y + .5), y = cy - L.tw * .9 - age / 40;
+      ctx.globalAlpha = 1 - Math.max(0, age - 600) / 400;
+      const rr = Math.max(9, L.tw * .3);
+      ctx.fillStyle = f.dmg ? '#b3261e' : '#2f6fd6';
+      ctx.beginPath(); ctx.arc(cx, y, rr, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = `bold ${rr}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(f.dmg, cx, y + 1); ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
+    }
+  }
+  s.fx = s.fx.filter(f => t - f.t < 1200);
+}
+
+function portal(x, y, orange, charge) {
+  const [cx, cy0] = iso(x, y), cy = cy0 - L.th * .9;
+  const rx = L.tw * .22 * cfg.w, ry = L.tw * .38;
+  const pulse = orange ? 1 : 1 + .08 * Math.sin(now() / (60 + 140 * (1 - charge)));
+  const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, ry * pulse);
+  if (orange) { g.addColorStop(0, '#fff0b0'); g.addColorStop(.45, '#ff9a2e'); g.addColorStop(1, 'rgba(255,110,0,0)'); }
+  else {
+    const a = .55 + .45 * charge;
+    g.addColorStop(0, `rgba(240,200,255,${a})`); g.addColorStop(.45, `rgba(150,50,230,${a})`); g.addColorStop(1, 'rgba(100,20,180,0)');
+  }
+  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(cx, cy, rx * pulse, ry * pulse, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+function boss(t) {
+  const [cx, cy0] = iso(cfg.q + .5, cfg.q + .5), cy = cy0 - L.tw * .45, r = L.tw * .5;
+  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(cx, cy0, r, r / 2, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#3a1d3f'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#e9d9a6'; ctx.beginPath(); ctx.ellipse(cx, cy, r * .6, r * .4, 0, 0, Math.PI * 2); ctx.fill();
+  const look = Math.sin(t / 700) * r * .15;
+  ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.arc(cx + look, cy, r * .25, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(cx + look, cy, r * .11, 0, Math.PI * 2); ctx.fill();
+}
+
+function playerPos(t) {
+  const k = Math.min(1, (t - s.tickAt) / cfg.tickMs), n = s.from.length - 1;
+  if (n <= 0) return s.from[0];
+  const u = k * n, i = Math.min(n - 1, Math.floor(u)), f = u - i, a = s.from[i], b = s.from[i + 1];
+  return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+}
+
+function player(p) {
+  const [cx, cy] = iso(p.x + .5, p.y + .5), h = L.tw * .75;
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(cx, cy, L.tw * .2, L.th * .2, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#6b4a2b'; ctx.fillRect(cx - L.tw * .1, cy - h, L.tw * .2, h * .75);
+  ctx.fillStyle = '#e2b48c'; ctx.beginPath(); ctx.arc(cx, cy - h - L.tw * .06, L.tw * .11, 0, Math.PI * 2); ctx.fill();
+}
+
+// ---------- input & loop ----------
+function canvasXY(e) { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+cv.addEventListener('pointermove', e => { s.hover = pick(...canvasXY(e)); });
+cv.addEventListener('pointerdown', e => {
+  const [mx, my] = canvasXY(e), raw = pick(mx, my), t = clampQuad(raw, s.quad);
+  s.queued = t;
+  s.fx.push({ type: 'click', t: now(), sx: mx, sy: my });
+  if (s.phase === 'waves' && !s.clickedAt && inSafe(t.x, t.y, s.orange)) s.clickedAt = now();
+});
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space') { e.preventDefault(); s.phase === 'idle' ? start() : pause(); }
+  if (e.code === 'KeyR') { cfg.run = !cfg.run; $('run').checked = cfg.run; }
+});
+$('start').onclick = () => (s.phase === 'idle' ? start() : pause());
+$('resetStats').onclick = () => { resetStats(); updateHUD(); };
+$('run').onchange = e => { cfg.run = e.target.checked; };
+$('fair').onchange = e => { cfg.fair = e.target.checked; };
+$('guides').onchange = e => { cfg.guides = e.target.checked; };
+for (const id of ['interval', 'sets', 'portalTicks', 'w', 'q']) {
+  $(id).onchange = e => {
+    cfg[id] = +e.target.value;
+    $(id).blur();
+    $('start').textContent = 'Start';
+    resetGame(); layout();
+  };
+}
+window.addEventListener('resize', layout);
+
+function loop() {
+  const t = now();
+  // If the tab was hidden, don't fast-forward through dozens of missed ticks.
+  if (t - s.tickAt > 5 * cfg.tickMs) s.tickAt = t;
+  while (t - s.tickAt >= cfg.tickMs) { s.tickAt += cfg.tickMs; onTick(); }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+resetStats(); resetGame(); layout(); updateHUD(); loop();
+</script>
+</body>
+</html>
